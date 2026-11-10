@@ -150,6 +150,28 @@ def _app() -> None:
         st.caption("WACC × exit EV/EBITDA")
         show(grid(sens["wacc_x_exit_multiple"], "cols_exit_multiple", lambda x: f"{x:.1f}x"))
 
+    # Reverse DCF (re-solved at the current slider settings)
+    rv = pack["reverse_dcf"]
+    st.markdown(f"#### Reverse DCF: what {usd(s['current_price'])} implies")
+    if rv.get("note"):
+        st.write(rv["note"])
+    else:
+        rp = lambda x: "no solution" if x is None else f"{x:.2%}"
+        gap = lambda x: None if x is None else f"{x * 100:+.1f} pts vs model"
+        r1, r2 = st.columns(2)
+        r1.metric("Constant revenue growth (all years)", rp(rv["revenue_growth"]["price_target"]),
+                  gap(rv["revenue_growth"]["gap_vs_model"]), delta_color="off")
+        r2.metric(f"Terminal EBIT margin (ramp from {rv['model']['year1_ebit_margin']:.1%})",
+                  rp(rv["ebit_margin"]["price_target"]), gap(rv["ebit_margin"]["gap_vs_model"]), delta_color="off")
+        st.dataframe(pd.DataFrame(
+            {"Price target basis": [rp(rv[k]["price_target"]) for k in ("revenue_growth", "ebit_margin")],
+             "Perpetual growth only": [rp(rv[k]["gordon"]) for k in ("revenue_growth", "ebit_margin")],
+             "Exit multiple only": [rp(rv[k]["exit_multiple"]) for k in ("revenue_growth", "ebit_margin")],
+             "Model": [f"{rv['model']['revenue_growth_cagr']:.2%} (CAGR)", f"{rv['model']['terminal_ebit_margin']:.2%}"]},
+            index=["Constant revenue growth", "Terminal EBIT margin"]), width="stretch")
+        st.caption("Each driver is solved alone so the DCF price equals the current price; all other assumptions "
+                   "(including the sliders above) are held fixed.")
+
     with st.expander("Projection drivers & data quality"):
         a = pack["assumptions"]["values"]
         st.dataframe(pd.DataFrame({key: a[key] for key in ("revenue_growth", "ebit_margin", "tax_rate",

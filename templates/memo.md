@@ -18,6 +18,16 @@ The price target is the average of the two DCF prices: perpetual growth {{dcf_go
 ## Variant view: what the market is missing
 [PROSE: compare the market-implied view with ours. At {{current_price}} the stock trades at {{target_ev_ebitda}} EV/EBITDA vs a peer median of {{peer_ev_ebitda}}.]
 
+## Reverse DCF: what the current price implies
+Holding everything else at our assumptions, the price target equals {{current_price}} only if:
+
+| Driver (solved alone) | Implied by price | Our model | Gap | Perpetual-growth only | Exit-multiple only |
+|---|---|---|---|---|---|
+| Constant revenue growth, all {{rdcf_years}} years | {{rdcf_growth}} | {{rdcf_model_growth}} (CAGR) | {{rdcf_growth_gap}} | {{rdcf_growth_gordon}} | {{rdcf_growth_exit}} |
+| Terminal EBIT margin (ramp from {{rdcf_year1_margin}}) | {{rdcf_margin}} | {{rdcf_model_margin}} | {{rdcf_margin_gap}} | {{rdcf_margin_gordon}} | {{rdcf_margin_exit}} |
+
+[PROSE: is the growth or margin the market is pricing in achievable? Why or why not?]
+
 ## Bull / Base / Bear
 | Case | Price | vs current | What you have to believe |
 |---|---|---|---|

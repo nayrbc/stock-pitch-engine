@@ -120,8 +120,23 @@ def fields(pack: dict) -> dict[str, str]:
         "weights": f"{w['weight_equity']:.1%} / {w['weight_debt']:.1%}",
         "tv_pct_gordon": _pct(pack["dcf"]["gordon"]["tv_pct_of_ev"]),
         "tv_pct_exit": _pct(pack["dcf"]["exit_multiple"]["tv_pct_of_ev"]),
+        **_reverse_fields(pack),
         "dq_count": str(len(dq_lines)), "data_quality": "\n".join(dq_lines) or "- none",
     }
+
+
+def _reverse_fields(pack: dict) -> dict[str, str]:
+    r = pack["reverse_dcf"]
+    out = {"rdcf_years": str(len(pack["assumptions"]["values"]["revenue_growth"])),
+           "rdcf_model_growth": _pct(r["model"]["revenue_growth_cagr"]),
+           "rdcf_model_margin": _pct(r["model"]["terminal_ebit_margin"]),
+           "rdcf_year1_margin": _pct(r["model"]["year1_ebit_margin"])}
+    for key, short in (("revenue_growth", "growth"), ("ebit_margin", "margin")):
+        for basis, suffix in (("price_target", ""), ("gordon", "_gordon"), ("exit_multiple", "_exit")):
+            v = r[key][basis]
+            out[f"rdcf_{short}{suffix}"] = "no solution" if v is None and "note" not in r else _pct(v)
+        out[f"rdcf_{short}_gap"] = "n/a" if r[key]["gap_vs_model"] is None else f"{r[key]['gap_vs_model'] * 100:+.1f} pts"
+    return out
 
 
 def render(pack: dict, template: str) -> str:

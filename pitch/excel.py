@@ -1,6 +1,6 @@
 """Write outputs/<TICKER>/model.xlsx: a live-formula model that reproduces the Phase 1 math.
 
-Tabs: Inputs · Historicals · DCF · Comps · Sensitivity · Summary.
+Tabs: Inputs · Historicals · DCF · Comps · Sensitivity · Reverse DCF · Summary.
 Blue font = hard-coded inputs; black = formulas. Formulas reference input cells only; the only
 literals inside formulas are structural constants (1 in 1+r, 0.5 mid-year offset, 0 in guards).
 Money is stored in absolute USD and displayed in $M via number format, so no unit constants in formulas.
@@ -392,6 +392,7 @@ def _dcf(wb, pack, R, D, H, X):
 
     X.update(rows=r, V=V, cols=cols, last=last)
     X["price_gordon"], X["price_exit"] = f"DCF!$B${V['price']}", f"DCF!$C${V['price']}"
+    X["rev_base"], X["rev_last"] = f"DCF!$B${r['revenue']}", f"DCF!${last}${r['revenue']}"
     X["upside_gordon"], X["upside_exit"] = f"DCF!$B${V['upside']}", f"DCF!$C${V['upside']}"
 
     ws.column_dimensions["A"].width = 44
@@ -553,6 +554,98 @@ def _sensitivity(wb, pack, R, X, S):
     return ws
 
 
+# ---------------------------------------------------------------- Reverse DCF
+
+def _reverse(wb, pack, R, D, H, X, RV):
+    """Solved drivers (blue, from Python bisection) + a live check DCF per driver that re-prices the stock
+    at the solved value. Each check's 'gap vs current price' should be ~0; Goal Seek it on the blue driver."""
+    ws = wb.create_sheet("Reverse DCF")
+    s = _Sheet(ws)
+    rv = pack["reverse_dcf"]
+    s.title(f"{pack['meta']['name']}: Reverse DCF (what the current price implies)",
+            "Solved one driver at a time, all other drivers as on Inputs. Blue = solved value; "
+            "re-solve in Excel with Goal Seek: set 'Gap vs current price' to 0 by changing the blue driver.")
+    r, cols, last = X["rows"], X["cols"], X["last"]
+    n_ref, base_col = f"DCF!${last}${r['year']}", "B"
+
+    # Solved table
+    s.label("A4", "Solved driver", bold=True, fill=HEADER_FILL)
+    heads = ["Price target basis", "Perpetual growth only", "Exit multiple only", "Model", "Gap (PT basis - model)"]
+    for j, h in enumerate(heads):
+        s.label(f"{col(2 + j)}4", h, bold=True, fill=HEADER_FILL).alignment = Alignment(horizontal="right")
+    s.label("A5", "Constant revenue growth (all years)")
+    s.label("A6", f"Terminal (year-{len(cols)}) EBIT margin")
+    s.f("E5", f"=({X['rev_last']}/{X['rev_base']})^(1/{n_ref})-1", PCT)
+    s.f("E6", f"={D['ebit_margin'][-1]}", PCT)
+    for rr, key in ((5, "revenue_growth"), (6, "ebit_margin")):
+        for c, basis in (("C", "gordon"), ("D", "exit_multiple")):
+            s.inp(f"{c}{rr}", rv[key][basis], PCT, note="No solution within search bounds.")
+        s.f(f"F{rr}", _guard(f"B{rr}-E{rr}", f"B{rr}", f"E{rr}"), PCT)
+    s.label("A7", "Model column: implied CAGR of the projected revenue path; year-N margin from Inputs.")
+    ws["A7"].font = Font(italic=True, color="666666")
+
+    def check(top, title, key, driver_label):
+        s.label(f"A{top}", title, bold=True, fill=HEADER_FILL)
+        s.label(f"B{top}", "Base", bold=True, fill=HEADER_FILL).alignment = Alignment(horizontal="right")
+        for t, c in enumerate(cols):
+            s.label(f"{c}{top}", f"Year {t + 1}", bold=True, fill=HEADER_FILL).alignment = Alignment(horizontal="right")
+        drv = f"$B${top + 1}"
+        s.label(f"A{top + 1}", driver_label, bold=True)
+        s.inp(drv, rv[key]["price_target"], PCT, note="No solution within search bounds.")
+        ws[drv].fill = KEY_FILL
+        lab = ["growth", "revenue", "margin", "ebit", "nopat", "da", "capex", "dnwc", "fcff", "ebitda", "pv"]
+        names = ["Revenue growth", "Revenue", "EBIT margin", "EBIT", "NOPAT", "D&A", "Capex", "Change in NWC",
+                 "Unlevered FCF", "EBITDA", "PV of FCF"]
+        L = {k: top + 2 + i for i, k in enumerate(lab)}
+        for k, nm in zip(lab, names):
+            s.label(f"A{L[k]}", nm, bold=k in ("fcff", "pv"))
+        s.f(f"{base_col}{L['revenue']}", f"={H['revenue'][-1]}", USD_M)
+        for t, c in enumerate(cols):
+            p = col(2 + t)
+            yr = f"DCF!{c}${r['year']}"
+            s.f(f"{c}{L['growth']}", f"={drv}" if key == "revenue_growth" else f"={D['revenue_growth'][t]}", PCT)
+            s.f(f"{c}{L['revenue']}", f"={p}{L['revenue']}*(1+{c}{L['growth']})", USD_M)
+            m0 = D["ebit_margin"][0]
+            s.f(f"{c}{L['margin']}", f"=IF({n_ref}=1,{drv},{m0}+({drv}-{m0})*({yr}-1)/({n_ref}-1))"
+                if key == "ebit_margin" else f"={D['ebit_margin'][t]}", PCT)
+            s.f(f"{c}{L['ebit']}", f"={c}{L['revenue']}*{c}{L['margin']}", USD_M)
+            s.f(f"{c}{L['nopat']}", f"={c}{L['ebit']}*(1-{D['tax_rate'][t]})", USD_M)
+            s.f(f"{c}{L['da']}", f"={c}{L['revenue']}*{D['da_pct_revenue'][t]}", USD_M)
+            s.f(f"{c}{L['capex']}", f"={c}{L['revenue']}*{D['capex_pct_revenue'][t]}", USD_M)
+            s.f(f"{c}{L['dnwc']}", f"={D['nwc_pct_revenue'][t]}*({c}{L['revenue']}-{p}{L['revenue']})", USD_M)
+            s.f(f"{c}{L['fcff']}", f"={c}{L['nopat']}+{c}{L['da']}-{c}{L['capex']}-{c}{L['dnwc']}", USD_M, bold=True)
+            s.f(f"{c}{L['ebitda']}", f"={c}{L['ebit']}+{c}{L['da']}", USD_M)
+            s.f(f"{c}{L['pv']}", f"={c}{L['fcff']}/(1+{R['wacc']})^DCF!{c}${r['period']}", USD_M, bold=True)
+        w, g, tvdf = R["wacc"], R["g"], f"(1+{R['wacc']})^{n_ref}"
+        fcf_n, ebitda_n = f"{last}{L['fcff']}", f"{last}{L['ebitda']}"
+        v = L["pv"] + 1
+        out = [("sum", "Sum of PV of FCF", f"=SUM(C{L['pv']}:{last}{L['pv']})", USD_M),
+               ("pg", "Implied price: perpetual growth",
+                f'=IF({w}>{g},(B{v}+{fcf_n}*(1+{g})/({w}-{g})/{tvdf}-{R["net_debt"]})/{R["shares"]},"n/a")', PRICE),
+               ("pe", "Implied price: exit multiple",
+                f"=(B{v}+{ebitda_n}*{R['exit_mult']}/{tvdf}-{R['net_debt']})/{R['shares']}", PRICE),
+               ("pt", "Implied price target (average)", f'=IFERROR(AVERAGE(B{v + 1},B{v + 2}),"n/a")', PRICE),
+               ("cur", "Current share price", f"={R['price']}", PRICE),
+               ("gap", "Gap vs current price (should be ~0)", _guard(f"B{v + 3}-B{v + 4}", f"B{v + 3}", f"B{v + 4}"), PRICE)]
+        for i, (k, lbl, fml, fmt) in enumerate(out):
+            s.label(f"A{v + i}", lbl, bold=k in ("pt", "gap"))
+            s.f(f"B{v + i}", fml, fmt, bold=k in ("pt", "gap"))
+        ws[f"B{v + 3}"].fill = KEY_FILL
+        RV[key] = {"driver": f"'Reverse DCF'!{drv}", "price_target": f"'Reverse DCF'!$B${v + 3}",
+                   "gap": f"'Reverse DCF'!$B${v + 5}"}
+        return v + len(out) + 1
+
+    nxt = check(9, "Check: constant revenue growth", "revenue_growth", "Solved constant revenue growth")
+    check(nxt, "Check: terminal EBIT margin", "ebit_margin", "Solved terminal EBIT margin")
+    for rr, key in ((5, "revenue_growth"), (6, "ebit_margin")):
+        s.f(f"B{rr}", _guard(RV[key]["driver"], RV[key]["driver"]), PCT, bold=True)
+
+    ws.column_dimensions["A"].width = 40
+    for c in ["B"] + cols + ["F"]:
+        ws.column_dimensions[c].width = 18
+    return ws
+
+
 # ---------------------------------------------------------------- Summary
 
 def _summary(wb, pack, R, X, C, S, OUT):
@@ -648,7 +741,7 @@ def build_workbook(pack: dict) -> tuple[Workbook, dict]:
     """Build the model workbook from a pitch pack. Returns (workbook, refs to key output cells)."""
     wb = Workbook()
     wb.active.title = "Summary"
-    R, D, H, X, C, S, OUT = {}, {}, {}, {}, {}, {}, {}
+    R, D, H, X, C, S, OUT, RV = {}, {}, {}, {}, {}, {}, {}, {}
     _inputs(wb, pack, R, D)
     _historicals(wb, pack, H)
     _dcf(wb, pack, R, D, H, X)
@@ -656,11 +749,12 @@ def build_workbook(pack: dict) -> tuple[Workbook, dict]:
     if str(pack["assumptions"]["sources"].get("exit_ev_ebitda", "")).startswith("peer median"):
         wb["Inputs"][R["exit_mult"].split("!")[1].replace("$", "")].value = f"={C['median']['EV/EBITDA']}"
     _sensitivity(wb, pack, R, X, S)
+    _reverse(wb, pack, R, D, H, X, RV)
     _summary(wb, pack, R, X, C, S, OUT)
     wb.move_sheet("Summary", offset=len(wb.sheetnames) - 1)  # tab order: Inputs ... Summary
     wb.active = wb.sheetnames.index("Summary")
     refs = {"inputs": R, "summary": OUT, "dcf": {"price_gordon": X["price_gordon"], "price_exit": X["price_exit"]},
-            "sensitivity": S, "comps": C}
+            "sensitivity": S, "comps": C, "reverse_dcf": RV}
     return wb, refs
 
 

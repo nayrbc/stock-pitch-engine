@@ -1,8 +1,8 @@
 import pytest
 
 from pitch.dcf import (
-    DCFError, _deep_merge, compute_wacc, load_config, project, resolve_assumptions, run_dcf,
-    sensitivities, terminal_gordon, value,
+    DCFError, _deep_merge, compute_wacc, load_config, margin_ramp, project, resolve_assumptions, reverse_dcf,
+    run_dcf, sensitivities, terminal_gordon, value,
 )
 from pitch.normalize import normalize
 
@@ -204,3 +204,61 @@ def test_ebit_margin_uses_median_robust_to_one_off_charge(cfg):
     # Even-length history -> mean of the middle two.
     from pitch.dcf import _median
     assert _median([0.1, 0.4, 0.2, 0.3]) == pytest.approx(0.25)
+
+
+# ---------------------------------------------------------------- reverse DCF
+
+def _px(a, **kw):
+    v = value(project(100.0, a, 2), 0.10, 0.02, 10, False, 20, 10, None)
+    pg, pe = v["gordon"]["implied_price"], v["exit_multiple"]["implied_price"]
+    return {"gordon": pg, "exit_multiple": pe, "price_target": (pg + pe) / 2}
+
+
+def test_reverse_dcf_round_trip_at_model_price():
+    # Price the stock at the model's own price target -> solved drivers recover the model's 10% / 20%.
+    pt = _px(A)["price_target"]  # (18.784091 + 25.818182) / 2
+    r = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, pt)
+    assert r["revenue_growth"]["price_target"] == pytest.approx(0.10, abs=1e-8)
+    assert r["ebit_margin"]["price_target"] == pytest.approx(0.20, abs=1e-8)
+    assert r["revenue_growth"]["gap_vs_model"] == pytest.approx(0, abs=1e-8)
+    assert r["model"]["revenue_growth_cagr"] == pytest.approx(0.10)
+    # Per-method solves bracket the blended one (Gordon < PT < exit at the model's drivers)
+    assert r["revenue_growth"]["gordon"] > 0.10 > r["revenue_growth"]["exit_multiple"]
+
+
+@pytest.mark.parametrize("price", [12.0, 20.0, 35.0])
+def test_reverse_dcf_solutions_reprice_exactly(price):
+    r = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, price)
+    for basis in ("price_target", "gordon", "exit_multiple"):
+        g = r["revenue_growth"][basis]
+        assert _px({**A, "revenue_growth": [g, g]})[basis] == pytest.approx(price, abs=1e-6)
+        m = r["ebit_margin"][basis]
+        assert _px({**A, "ebit_margin": margin_ramp(0.20, m, 2)})[basis] == pytest.approx(price, abs=1e-6)
+
+
+def test_reverse_dcf_monotonic_in_price():
+    lo = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, 15.0)
+    hi = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, 30.0)
+    assert lo["revenue_growth"]["price_target"] < hi["revenue_growth"]["price_target"]
+    assert lo["ebit_margin"]["price_target"] < hi["ebit_margin"]["price_target"]
+
+
+def test_margin_ramp_hand_checked():
+    assert margin_ramp(0.20, 0.30, 3) == pytest.approx([0.20, 0.25, 0.30])
+    assert margin_ramp(0.20, 0.30, 1) == [0.30]
+
+
+def test_reverse_dcf_no_solution_and_missing_inputs():
+    # A price far beyond anything reachable inside the search bounds -> None, not a bogus value
+    r = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, 1e6)
+    assert r["revenue_growth"]["price_target"] is None and r["revenue_growth"]["gap_vs_model"] is None
+    r = reverse_dcf(100.0, A, 2, 0.10, 0.02, 10, False, 20, 10, None)
+    assert "note" in r and r["ebit_margin"]["price_target"] is None
+
+
+def test_run_dcf_includes_reverse_dcf(facts, cfg):
+    out = run_dcf(normalize(facts), {"price": 20, "market_cap": 200, "beta": 1.0}, cfg, exit_multiple=10)
+    r = out["reverse_dcf"]
+    assert r["target_price"] == 20
+    g = r["revenue_growth"]["price_target"]
+    assert g is not None and -0.5 < g < 1.0

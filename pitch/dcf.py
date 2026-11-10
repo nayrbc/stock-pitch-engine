@@ -337,6 +337,91 @@ def sensitivities(rows: list[dict], wacc: float, g: float, exit_multiple: float,
     }
 
 
+# ---------------------------------------------------------------- reverse DCF
+
+# Search bounds for the solved driver (decimal). Wide on purpose: the answer may be extreme.
+REVERSE_BOUNDS = {"revenue_growth": (-0.50, 1.00), "ebit_margin": (-0.50, 1.00)}
+REVERSE_BASES = ("price_target", "gordon", "exit_multiple")
+
+
+def margin_ramp(m0: float, m_term: float, n: int) -> list[float]:
+    """EBIT margin path: year 1 at the model's margin, linear to m_term in year n (n = 1 -> just m_term)."""
+    return fade_path(m0, m_term, n) if n > 1 else [m_term]
+
+
+def _solve(f, lo: float, hi: float, near: float, steps: int = 300, tol: float = 1e-10) -> float | None:
+    """Root of f on [lo, hi]: scan for sign changes, take the bracket nearest `near`, then bisect."""
+    xs = [lo + (hi - lo) * i / steps for i in range(steps + 1)]
+    ys = [f(x) for x in xs]
+    brackets = [(xs[i], xs[i + 1], ys[i], ys[i + 1]) for i in range(steps)
+                if ys[i] is not None and ys[i + 1] is not None and ys[i] * ys[i + 1] <= 0]
+    if not brackets:
+        return None
+    a, b, fa, _ = min(brackets, key=lambda br: abs((br[0] + br[1]) / 2 - near))
+    if fa == 0:
+        return a
+    while b - a > tol:
+        m = (a + b) / 2
+        fm = f(m)
+        if (fm < 0) == (fa < 0):
+            a, fa = m, fm
+        else:
+            b = m
+    return (a + b) / 2
+
+
+def reverse_dcf(base_revenue: float, a: dict, n: int, wacc: float, g: float, exit_multiple: float, mid_year: bool,
+                net_debt: float | None, shares: float | None, price: float | None) -> dict:
+    """Solve for the driver value that makes the DCF implied price equal the current price.
+
+    Two separate one-variable solves, all other drivers held at the model's values:
+    - revenue_growth: one constant growth rate applied in every projection year.
+    - ebit_margin: terminal (year-N) EBIT margin, ramping linearly from the model's year-1 margin.
+    Each is solved against three bases: the price target (average of both DCF prices), the
+    perpetual-growth price and the exit-multiple price. None = no solution inside REVERSE_BOUNDS.
+    """
+    model = {
+        "revenue_growth": (project(base_revenue, a, n)[-1]["revenue"] / base_revenue) ** (1 / n) - 1,
+        "ebit_margin": a["ebit_margin"][-1],
+    }
+    out = {
+        "target_price": price,
+        "definitions": {
+            "revenue_growth": "constant revenue growth in every projection year (other drivers unchanged)",
+            "ebit_margin": f"year-{n} EBIT margin, linear ramp from year-1 margin "
+                           f"{a['ebit_margin'][0]:.2%} (other drivers unchanged)",
+            "price_target": "average of perpetual-growth and exit-multiple DCF prices",
+        },
+        "model": {"revenue_growth_cagr": model["revenue_growth"], "terminal_ebit_margin": model["ebit_margin"],
+                  "year1_ebit_margin": a["ebit_margin"][0]},
+        "bounds": {k: list(v) for k, v in REVERSE_BOUNDS.items()},
+    }
+    if price is None or net_debt is None or not shares:
+        out["note"] = "no current price, net debt or share count; reverse DCF not solved"
+        for key in REVERSE_BOUNDS:
+            out[key] = {b: None for b in REVERSE_BASES}
+        return out
+
+    def prices(drivers: dict) -> dict:
+        v = value(project(base_revenue, {**a, **drivers}, n), wacc, g, exit_multiple, mid_year, net_debt, shares, None)
+        pg, pe = v["gordon"]["implied_price"], v["exit_multiple"]["implied_price"]
+        return {"gordon": pg, "exit_multiple": pe, "price_target": (pg + pe) / 2}
+
+    build = {"revenue_growth": lambda x: {"revenue_growth": [x] * n},
+             "ebit_margin": lambda x: {"ebit_margin": margin_ramp(a["ebit_margin"][0], x, n)}}
+    for key, (lo, hi) in REVERSE_BOUNDS.items():
+        out[key] = {}
+        for basis in REVERSE_BASES:
+            def f(x, key=key, basis=basis):
+                if key == "revenue_growth" and x <= -1:
+                    return None
+                return prices(build[key](x))[basis] - price
+            out[key][basis] = _solve(f, lo, hi, near=model[key])
+        out[key]["gap_vs_model"] = (None if out[key]["price_target"] is None
+                                    else out[key]["price_target"] - model[key])
+    return out
+
+
 def run_dcf(hist: dict, market: dict, cfg: dict, exit_multiple: float | None = None,
             exit_multiple_source: str | None = None) -> dict:
     """End-to-end DCF from normalized historicals + market snapshot + config. Pure."""
@@ -382,6 +467,12 @@ def run_dcf(hist: dict, market: dict, cfg: dict, exit_multiple: float | None = N
                 net_debt, shares, market.get("price"))
     sens = sensitivities(rows, wacc["wacc"], a["terminal_growth"], exit_multiple, a["mid_year_convention"],
                          net_debt, shares, cfg["sensitivity"])
+    rev = reverse_dcf(base_rev, a, n, wacc["wacc"], a["terminal_growth"], exit_multiple, a["mid_year_convention"],
+                      net_debt, shares, market.get("price"))
+    for key in REVERSE_BOUNDS:
+        if rev.get("note") is None and rev[key]["price_target"] is None:
+            dq.append({"item": f"reverse_dcf.{key}", "issue": "no_solution",
+                       "detail": f"no {key} in {REVERSE_BOUNDS[key]} makes the price target equal the current price"})
     return {
         "assumptions": {**a, "exit_ev_ebitda": exit_multiple},
         "assumption_sources": sources,
@@ -392,5 +483,6 @@ def run_dcf(hist: dict, market: dict, cfg: dict, exit_multiple: float | None = N
                           "net_debt": net_debt, "diluted_shares": shares, "diluted_shares_source": shares_src},
         **val,
         "sensitivity": sens,
+        "reverse_dcf": rev,
         "data_quality": dq,
     }

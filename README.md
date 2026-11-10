@@ -22,7 +22,8 @@ Built for investment-club pitches and stock-pitch competitions. The goal is outp
 - Two-method DCF (perpetual growth and exit multiple), CAPM-based WACC, mid-year discounting, and a full enterprise-to-equity bridge.
 - The Excel model follows banker conventions (blue inputs, black formulas, no hard-coded numbers inside formulas).
 - Every missing or estimated data point is flagged, never silently filled with zero.
-- Pure-Python valuation core with 50 unit tests, including hand-checked DCF cases.
+- Reverse DCF: solves for the constant revenue growth and terminal EBIT margin the current price implies (in the JSON, a live Excel tab, the memo and the UI).
+- Pure-Python valuation core with 61 unit tests, including hand-checked DCF cases.
 
 ---
 

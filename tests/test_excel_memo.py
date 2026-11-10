@@ -33,6 +33,7 @@ def model(pack, tmp_path_factory):
 
 def _key(path, ref):
     sheet, cell = ref.split("!")
+    sheet = sheet.strip("'")
     return f"'[{path.name}]{sheet.upper()}'!{cell.replace('$', '')}"
 
 
@@ -95,7 +96,8 @@ def test_tabs_and_chart(model):
     _, _, path = model
     import openpyxl
     wb = openpyxl.load_workbook(path)
-    assert wb.sheetnames == ["Inputs", "Historicals", "DCF", "Comps", "Sensitivity", "Summary"]
+    assert wb.sheetnames == ["Inputs", "Historicals", "DCF", "Comps", "Sensitivity", "Reverse DCF",
+                             "Summary"]
     assert len(wb["Summary"]._charts) == 1
 
 
@@ -113,3 +115,28 @@ def test_scenarios_ordering_and_rating(pack):
     assert s["price_target"] == pytest.approx(
         (pack["dcf"]["gordon"]["implied_price"] + pack["dcf"]["exit_multiple"]["implied_price"]) / 2)
     assert s["rating"] in {"BUY", "HOLD", "SELL"}
+
+
+def test_reverse_dcf_tab_reprices_to_current_price(model, pack):
+    xl, refs, path = model
+    sol = xl.calculate()
+    price = pack["valuation_summary"]["current_price"]
+    for key in ("revenue_growth", "ebit_margin"):
+        r = refs["reverse_dcf"][key]
+        assert _get(sol, path, r["driver"]) == pytest.approx(pack["reverse_dcf"][key]["price_target"])
+        assert _get(sol, path, r["price_target"]) == pytest.approx(price, abs=0.01), key
+        assert _get(sol, path, r["gap"]) == pytest.approx(0, abs=0.01), key
+
+
+def test_reverse_dcf_tab_driver_is_live(model, pack):
+    xl, refs, path = model
+    r = refs["reverse_dcf"]["revenue_growth"]
+    sol = xl.calculate(inputs={_key(path, r["driver"]): pack["reverse_dcf"]["revenue_growth"]["price_target"] + 0.02})
+    assert _get(sol, path, r["gap"]) > 0.01
+
+
+def test_memo_shows_reverse_dcf(pack):
+    text = render(pack, TEMPLATE.read_text())
+    assert "Reverse DCF" in text
+    assert f"{pack['reverse_dcf']['revenue_growth']['price_target']:.1%}" in text
+    assert f"{pack['reverse_dcf']['ebit_margin']['price_target']:.1%}" in text

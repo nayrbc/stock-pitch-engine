@@ -18,9 +18,9 @@ from pitch.dcf import load_config, run_dcf
 from pitch.normalize import normalize
 
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REQUIRED_KEYS = ["schema_version", "meta", "market", "historicals", "assumptions", "wacc", "dcf",
-                 "sensitivity", "comps", "valuation_summary", "data_quality"]
+                 "sensitivity", "reverse_dcf", "comps", "valuation_summary", "data_quality"]
 
 # Banks, credit institutions, brokers (6000-6299) and insurers (6300-6411): FCFF DCF doesn't apply.
 FINANCIAL_SIC_RANGES = [(6000, 6299), (6300, 6411)]
@@ -55,6 +55,7 @@ def build_pack(ticker: str, hist: dict, mkt: dict, peers: dict[str, tuple[dict, 
                   exit_multiple_source=f"peer median EV/EBITDA ({', '.join(peers)})" if peer_ev_ebitda else None)
     dq += [{"source": "dcf", **d} for d in dcf.pop("data_quality")]
     sens = dcf.pop("sensitivity")
+    rev = dcf.pop("reverse_dcf")
 
     summary = {
         "current_price": mkt.get("price"),
@@ -80,6 +81,7 @@ def build_pack(ticker: str, hist: dict, mkt: dict, peers: dict[str, tuple[dict, 
         "wacc": dcf.pop("wacc"),
         "dcf": dcf,
         "sensitivity": sens,
+        "reverse_dcf": rev,
         "comps": comps,
         "valuation_summary": summary,
         "data_quality": dq,
@@ -170,6 +172,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"price {fmt(s['current_price'])} | DCF gordon {fmt(s['dcf_gordon']['implied_price'])} | "
           f"DCF exit {fmt(s['dcf_exit_multiple']['implied_price'])} | WACC {pack['wacc']['wacc']:.2%} | "
           f"data_quality flags: {len(pack['data_quality'])}")
+    r, pct = pack["reverse_dcf"], lambda x: "n/a" if x is None else f"{x:.2%}"
+    print(f"reverse DCF @ {fmt(s['current_price'])}: constant revenue growth {pct(r['revenue_growth']['price_target'])} "
+          f"| terminal EBIT margin {pct(r['ebit_margin']['price_target'])}")
     return 0
 
 
