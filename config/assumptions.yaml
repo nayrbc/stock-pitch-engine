@@ -40,3 +40,7 @@ sensitivity:
   terminal_growth_step: 0.005
   exit_multiple_step: 2.0
   steps_each_side: 2             # grid is (2n+1) x (2n+1)
+
+memo:
+  buy_threshold: 0.15            # base-case upside >= this -> BUY
+  sell_threshold: -0.15          # base-case upside <= this -> SELL; otherwise HOLD
