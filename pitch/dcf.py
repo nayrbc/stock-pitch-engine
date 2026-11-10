@@ -57,6 +57,17 @@ def _mean(xs: list[float]) -> float | None:
     return sum(xs) / len(xs) if xs else None
 
 
+def _median(xs: list[float]) -> float | None:
+    if not xs:
+        return None
+    ys, k = sorted(xs), len(xs) // 2
+    return ys[k] if len(ys) % 2 else (ys[k - 1] + ys[k]) / 2
+
+
+# Drivers that use the median rather than the mean (robust to one-off charges in a single year).
+MEDIAN_DRIVERS = {"ebit_margin"}
+
+
 def historical_ratios(hist: dict) -> dict:
     """Historical drivers from normalized data. Each value is None if no usable years."""
     it = hist["items"]
@@ -73,7 +84,7 @@ def historical_ratios(hist: dict) -> dict:
     return {
         "revenue_cagr": cagr,
         "revenue_growth_yoy": [None if None in (a, b) or not a else b / a - 1 for a, b in pairs],
-        "ebit_margin": _mean(_ratios(it["ebit"], rev)),
+        "ebit_margin": _median(_ratios(it["ebit"], rev)),
         "tax_rate": _mean(tax_rates),
         "capex_pct_revenue": _mean(_ratios(it["capex"], rev)),
         "da_pct_revenue": _mean(_ratios(it["da"], rev)),
@@ -99,7 +110,7 @@ def _path(value, n: int) -> list[float]:
 
 
 def resolve_assumptions(hist: dict, cfg: dict) -> dict:
-    """Projection drivers: config value if set, else clamped historical average. Records the source of each.
+    """Projection drivers: config value if set, else clamped historical average (median for EBIT margin). Records the source of each.
 
     Returns {"values": {...}, "sources": {...}, "data_quality": [...]}; raises DCFError if a driver has
     neither a config value nor any historical data.
@@ -143,7 +154,8 @@ def resolve_assumptions(hist: dict, cfg: dict) -> dict:
             raise DCFError(f"{key}: no config value and no historical data")
         cv = _clamp(hv, clamps[key])
         values[key] = [cv] * n
-        sources[key] = f"historical avg {hv:.2%} over {h['years_used'][key]}y" + (f", clamped to {cv:.2%}" if cv != hv else "")
+        stat = "median" if key in MEDIAN_DRIVERS else "avg"
+        sources[key] = f"historical {stat} {hv:.2%} over {h['years_used'][key]}y" + (f", clamped to {cv:.2%}" if cv != hv else "")
         if cv != hv:
             dq.append({"item": key, "issue": "clamped", "detail": sources[key]})
         if h["years_used"][key] < len(hist["periods"]):

@@ -20,7 +20,7 @@ dcf:
   fallback_exit_ev_ebitda: 12.0
   # Paths: a scalar (held flat), a list of `projection_years` values, or null (historical).
   revenue_growth: null           # null -> start at avg(last-year growth, 5y CAGR), fading linearly to terminal_growth in final year
-  ebit_margin: null              # null -> historical average, held flat
+  ebit_margin: null              # null -> historical median (robust to one-off charges), held flat
   tax_rate: null                 # null -> historical effective rate (tax / pre-tax income)
   capex_pct_revenue: null
   da_pct_revenue: null

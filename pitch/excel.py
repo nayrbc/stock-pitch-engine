@@ -232,7 +232,7 @@ def _historicals(wb, pack, H):
     for c, fy, p in zip(cols, h["fiscal_years"], h["periods"]):
         s.label(f"{c}4", fy, bold=True, fill=HEADER_FILL).alignment = Alignment(horizontal="right")
         s.label(f"{c}5", p, fill=HEADER_FILL).alignment = Alignment(horizontal="right")
-    s.label(f"{avg_col}4", "Average", bold=True, fill=HEADER_FILL)
+    s.label(f"{avg_col}4", "Average (EBIT margin: median)", bold=True, fill=HEADER_FILL)
     row = 6
     for key, label, fmt in HIST_ROWS:
         s.label(f"A{row}", label)
@@ -250,7 +250,7 @@ def _historicals(wb, pack, H):
     s.label(f"A{row}", "Ratios & derived", bold=True, fill=HEADER_FILL)
     row += 1
 
-    def ratio(key, label, fmt, build, start=0, average=True):
+    def ratio(key, label, fmt, build, start=0, average=True, stat="AVERAGE"):
         nonlocal row
         s.label(f"A{row}", label)
         H[key] = [None] * n
@@ -258,7 +258,7 @@ def _historicals(wb, pack, H):
             s.f(f"{cols[i]}{row}", build(i), fmt)
             H[key][i] = f"Historicals!{cols[i]}{row}"
         if average:
-            s.f(f"{avg_col}{row}", f'=IFERROR(AVERAGE({cols[start]}{row}:{cols[-1]}{row}),"n/a")', fmt)
+            s.f(f"{avg_col}{row}", f'=IFERROR({stat}({cols[start]}{row}:{cols[-1]}{row}),"n/a")', fmt)
         row += 1
 
     I = H
@@ -267,7 +267,7 @@ def _historicals(wb, pack, H):
     ratio("gross_margin", "Gross margin", PCT,
           lambda i: _guard(f"{I['gross_profit'][i]}/{I['revenue'][i]}", I["gross_profit"][i], I["revenue"][i]))
     ratio("ebit_margin", "EBIT margin", PCT,
-          lambda i: _guard(f"{I['ebit'][i]}/{I['revenue'][i]}", I["ebit"][i], I["revenue"][i]))
+          lambda i: _guard(f"{I['ebit'][i]}/{I['revenue'][i]}", I["ebit"][i], I["revenue"][i]), stat="MEDIAN")
     ratio("ebitda", "EBITDA", USD_M, lambda i: _guard(f"{I['ebit'][i]}+{I['da'][i]}", I["ebit"][i], I["da"][i]),
           average=False)
     ratio("tax_rate", "Effective tax rate", PCT,

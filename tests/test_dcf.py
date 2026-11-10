@@ -188,3 +188,19 @@ def test_blume_adjusted_beta(facts, cfg):
     fixed = run_dcf(h, {"price": 20.0, "market_cap": 200.0, "beta": 1.6}, _deep_merge(cfg, {"market": {"beta": 1.2}}),
                     exit_multiple=10.0)
     assert fixed["wacc"]["beta"] == 1.2
+
+
+def test_ebit_margin_uses_median_robust_to_one_off_charge(cfg):
+    """Regression: a single impairment year must not drag the default margin down (KO FY2024 case)."""
+    from tests.conftest import base_series, make_facts
+    s = base_series()
+    rev = s["Revenues"][0]
+    # Margins 20%, 20%, 20%, 5% (one-off charge), 22% -> median 20%; mean would be 17.4%.
+    s["OperatingIncomeLoss"] = ([r * m for r, m in zip(rev, [0.20, 0.20, 0.20, 0.05, 0.22])], True)
+    h = normalize(make_facts(s, {"WeightedAverageNumberOfDilutedSharesOutstanding": "shares"}))
+    r = resolve_assumptions(h, cfg)
+    assert r["values"]["ebit_margin"] == pytest.approx([0.20] * 5)
+    assert r["sources"]["ebit_margin"].startswith("historical median")
+    # Even-length history -> mean of the middle two.
+    from pitch.dcf import _median
+    assert _median([0.1, 0.4, 0.2, 0.3]) == pytest.approx(0.25)
