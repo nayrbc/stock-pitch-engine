@@ -15,7 +15,6 @@ From free public data (SEC filings + market prices), the engine builds:
 Built for investment-club pitches and stock-pitch competitions. The goal is output that looks like analyst work, with every assumption traceable to a source.
 
 ![Streamlit UI: assumption sliders, implied price, football field and sensitivity grids](docs/screenshot.png)
-<!-- TODO: add docs/screenshot.png (capture of `uv run pitch-ui` on AAPL) -->
 
 **Highlights**
 - Reads raw XBRL financial data from SEC EDGAR and normalizes inconsistent company tagging into standard financial statements.

@@ -125,7 +125,7 @@ def _app() -> None:
         rules = alt.Chart(refs).mark_rule(strokeWidth=2).encode(
             x="x:Q", strokeDash=alt.StrokeDash("label:N", legend=alt.Legend(title=None, orient="top")),
             tooltip=["label", alt.Tooltip("x:Q", format="$,.2f")])
-        st.altair_chart((bars + rules).properties(height=200), width="stretch")
+        st.altair_chart((bars + rules).properties(height=200), width="stretch", height=240)
 
     # Sensitivity grids
     st.markdown("#### Sensitivity (implied price)")
