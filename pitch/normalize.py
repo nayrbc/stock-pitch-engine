@@ -62,6 +62,8 @@ TAGS: dict[str, list[str]] = {
         "LongTermDebt",
         "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
         "DebtLongtermAndShorttermCombinedAmount",
+        "DebtAndCapitalLeaseObligations",
+        "UnsecuredDebt",
     ],
     "debt_lt_noncurrent": ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"],
     "debt_lt_current": ["LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent", "DebtCurrent"],
