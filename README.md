@@ -32,7 +32,7 @@ Built for investment-club pitches and stock-pitch competitions. The goal is outp
 Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-git clone <this repo> && cd stock-pitch-engine
+git clone https://github.com/nayrbc/stock-pitch-engine.git && cd stock-pitch-engine
 uv sync
 cp .env.example .env        # set EDGAR_USER_AGENT="Your Name you@example.com" (required by the SEC)
 ```
