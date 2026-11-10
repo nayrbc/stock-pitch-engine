@@ -33,7 +33,7 @@ TAGS: dict[str, list[str]] = {
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
     ],
     "tax": ["IncomeTaxExpenseBenefit"],
-    "net_income": ["NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic"],
+    "net_income": ["NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"],
     "cfo": [
         "NetCashProvidedByUsedInOperatingActivities",
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
@@ -47,8 +47,13 @@ TAGS: dict[str, list[str]] = {
     "short_term_investments": [
         "MarketableSecuritiesCurrent",
         "ShortTermInvestments",
+        "OtherShortTermInvestments",
         "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+        "DebtSecuritiesCurrent",
     ],
+    # Fallbacks used only via derivation (flagged): may include noncurrent / interest income.
+    "afs_debt_total": ["AvailableForSaleSecuritiesDebtSecurities"],
+    "interest_net_nonop": ["InterestIncomeExpenseNonoperatingNet"],
     "current_assets": ["AssetsCurrent"],
     "current_liabilities": ["LiabilitiesCurrent"],
     "shares_diluted": ["WeightedAverageNumberOfDilutedSharesOutstanding"],
@@ -121,7 +126,27 @@ def normalize(facts: dict, years: int = 5) -> dict:
         else:
             items[item], sources[item] = [None] * len(periods), [None] * len(periods)
 
+    _split_adjust_shares(items["shares_diluted"], sources["shares_diluted"], flag)
+
     for i in range(len(periods)):
+        # Net income: ProfitLoss includes noncontrolling interests
+        if sources["net_income"][i] == "ProfitLoss":
+            flag("net_income", i, "derived", "ProfitLoss (includes noncontrolling interests); no NetIncomeLoss tag")
+
+        # Interest expense: fall back to net nonoperating interest when it is a net expense
+        if items["interest"][i] is None:
+            net = raw["interest_net_nonop"][0][i]
+            if net is not None and net < 0:
+                items["interest"][i], sources["interest"][i] = -net, "derived: -InterestIncomeExpenseNonoperatingNet"
+                flag("interest", i, "derived", "net nonoperating interest (expense net of interest income)")
+
+        # ST investments: fall back to total AFS debt securities (may include noncurrent)
+        if items["short_term_investments"][i] is None and raw["afs_debt_total"][0][i] is not None:
+            items["short_term_investments"][i] = raw["afs_debt_total"][0][i]
+            sources["short_term_investments"][i] = "derived: AvailableForSaleSecuritiesDebtSecurities"
+            flag("short_term_investments", i, "derived",
+                 "total AFS debt securities (no current-only tag; may include noncurrent)")
+
         # Gross profit: derive from revenue - cost of revenue
         if items["gross_profit"][i] is None:
             cogs, ctag = raw["cost_of_revenue"][0][i], raw["cost_of_revenue"][1][i]
@@ -195,6 +220,31 @@ def normalize(facts: dict, years: int = 5) -> dict:
         "sources": sources,
         "data_quality": dq,
     }
+
+
+SPLIT_RATIOS = (2, 3, 4, 5, 8, 10, 15, 20, 25, 30, 40, 50)
+
+
+def _split_adjust_shares(vals: list, srcs: list, flag) -> None:
+    """Restate share counts for stock splits in place.
+
+    Comparatives last filed before a split are never restated in companyfacts (e.g. NVDA FY2022 shares
+    are pre-10:1-split). Walking newest -> oldest, a jump between consecutive years within 10% of a
+    common split ratio is treated as a split and older values are scaled. Reverse splits likewise.
+    """
+    factor, newer = 1.0, None  # newer = nearest newer (already adjusted) value
+    for i in range(len(vals) - 1, -1, -1):
+        cur = vals[i]
+        if cur is None or cur <= 0:
+            continue
+        if newer is not None:
+            jump = newer / (cur * factor)
+            factor *= next((q for r in SPLIT_RATIOS for q in (r, 1 / r) if abs(jump / q - 1) <= 0.10), 1.0)
+        if factor != 1.0:
+            vals[i] = round(cur * factor)
+            srcs[i] = f"{srcs[i]} (split-adjusted x{factor:g})"
+            flag("shares_diluted", i, "derived", f"split-adjusted x{factor:g} (pre-split comparative)")
+        newer = vals[i]
 
 
 def latest(hist: dict, item: str):

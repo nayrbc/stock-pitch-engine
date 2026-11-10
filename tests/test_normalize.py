@@ -98,3 +98,66 @@ def test_non_10k_ignored():
     rows = f["facts"]["us-gaap"]["Revenues"]["units"]["USD"]
     rows.append({**rows[-1], "val": 999, "form": "10-Q", "filed": "2027-02-01"})
     assert normalize(f)["items"]["revenue"][-1] == 146.41
+
+
+# --- Phase 3 regressions (real-filer tagging found running KO / NVDA / peers) ---
+
+def _issues(h, item):
+    return [d for d in h["data_quality"] if d["item"] == item]
+
+
+def test_pre_split_share_comparative_is_restated():
+    """NVDA: FY2022 diluted shares last filed pre-10:1 split (2,535M vs 25,070M)."""
+    s = base_series()
+    s["WeightedAverageNumberOfDilutedSharesOutstanding"] = ([2535, 25070, 24940, 24804, 24514], True)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["shares_diluted"] == [25350, 25070, 24940, 24804, 24514]
+    assert [d["period"] for d in _issues(h, "shares_diluted")] == [PERIODS[0]]
+
+
+def test_ordinary_share_changes_not_treated_as_splits():
+    s = base_series()
+    s["WeightedAverageNumberOfDilutedSharesOutstanding"] = ([100, 95, 120, 118, 110], True)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["shares_diluted"] == [100, 95, 120, 118, 110]
+    assert not _issues(h, "shares_diluted")
+
+
+def test_short_term_investments_other_tag():
+    """KO: ST investments tagged OtherShortTermInvestments."""
+    s = base_series()
+    s["OtherShortTermInvestments"] = ([3] * 5, False)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["short_term_investments"] == [3] * 5
+
+
+def test_short_term_investments_afs_total_fallback_flagged():
+    """NVDA FY2026: only total AFS debt securities tagged in the 10-K; must not land in NWC."""
+    s = base_series()
+    s["MarketableSecuritiesCurrent"] = ([5, 5, 5, 5, None], False)
+    s["AvailableForSaleSecuritiesDebtSecurities"] = ([None] * 4 + [8], False)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["short_term_investments"] == [5, 5, 5, 5, 8]
+    assert [d["issue"] for d in _issues(h, "short_term_investments")] == ["derived"]
+    assert operating_nwc(h)[-1] == (40 - 10 - 8) - 30
+
+
+def test_net_income_profitloss_fallback_flagged():
+    """AVGO: net income only under ProfitLoss."""
+    s = base_series()
+    ni = s.pop("NetIncomeLoss")[0]
+    s["ProfitLoss"] = (ni, True)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["net_income"] == ni
+    assert {d["issue"] for d in _issues(h, "net_income")} == {"derived"}
+
+
+def test_interest_from_net_nonoperating_flagged():
+    """KDP: only InterestIncomeExpenseNonoperatingNet (negative = net expense)."""
+    s = base_series()
+    s.pop("InterestExpense")
+    s["InterestIncomeExpenseNonoperatingNet"] = ([-2, -2, 1, -2, -2], True)
+    h = normalize(make_facts(s, SHARES))
+    assert h["items"]["interest"] == [2, 2, None, 2, 2]
+    assert {(d["period"], d["issue"]) for d in _issues(h, "interest")} == (
+        {(p, "derived") for p in PERIODS[:2] + PERIODS[3:]} | {(PERIODS[2], "missing")})
