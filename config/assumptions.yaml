@@ -1,0 +1,42 @@
+# Global valuation assumptions. Override per ticker in config/<TICKER>.yaml (deep-merged).
+# `null` means "derive from historicals" (averages, clamped to `clamps` below).
+
+history_years: 5
+projection_years: 5
+
+market:
+  risk_free_rate: 0.043          # 10y UST
+  equity_risk_premium: 0.050
+  beta: null                     # null -> yfinance beta
+  fallback_beta: 1.0             # used (and flagged) only if yfinance has no beta
+  pre_tax_cost_of_debt: null     # null -> latest interest expense / total debt
+  fallback_pre_tax_cost_of_debt: 0.050  # used (and flagged) if interest or debt is missing
+
+dcf:
+  mid_year_convention: true
+  terminal_growth: 0.025
+  exit_ev_ebitda: null           # null -> peer median EV/EBITDA, else fallback below
+  fallback_exit_ev_ebitda: 12.0
+  # Paths: a scalar (held flat), a list of `projection_years` values, or null (historical).
+  revenue_growth: null           # null -> historical CAGR, fading linearly to terminal_growth in final year
+  ebit_margin: null              # null -> historical average, held flat
+  tax_rate: null                 # null -> historical effective rate (tax / pre-tax income)
+  capex_pct_revenue: null
+  da_pct_revenue: null
+  nwc_pct_revenue: null          # operating NWC (ex cash & debt) as % of revenue
+
+clamps:
+  revenue_growth: [-0.10, 0.30]
+  ebit_margin: [0.00, 0.60]
+  tax_rate: [0.10, 0.30]
+  capex_pct_revenue: [0.00, 0.30]
+  da_pct_revenue: [0.00, 0.30]
+  nwc_pct_revenue: [-0.30, 0.40]
+  beta: [0.50, 2.50]
+  pre_tax_cost_of_debt: [0.02, 0.12]
+
+sensitivity:
+  wacc_step: 0.005
+  terminal_growth_step: 0.005
+  exit_multiple_step: 2.0
+  steps_each_side: 2             # grid is (2n+1) x (2n+1)
