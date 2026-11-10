@@ -121,23 +121,35 @@ def fetch_company(ticker: str, years: int) -> tuple[dict, dict]:
     return normalize(edgar.get_company_facts(ticker), years), market.get_market_data(ticker)
 
 
-def run(ticker: str, peer_list: list[str], out_dir: Path = OUTPUT_DIR) -> Path:
-    """I/O wrapper: fetch everything, build, validate, write."""
+def fetch_inputs(ticker: str, peer_list: list[str], history_years: int) -> dict:
+    """All network I/O for a pack: SIC check, target + peer financials and market data."""
     ticker = ticker.upper()
     sic = edgar.get_sic(ticker)
     if is_financial(sic):
         raise UnsupportedCompany(f"{ticker} has SIC {sic} (bank/insurer); FCFF DCF doesn't apply. Out of scope.")
-    cfg = load_config(ticker)
-    hist, mkt = fetch_company(ticker, cfg["history_years"])
+    hist, mkt = fetch_company(ticker, history_years)
     peers, skipped = {}, []
     for p in peer_list:
         try:
-            peers[p] = fetch_company(p, cfg["history_years"])
+            peers[p] = fetch_company(p, history_years)
         except Exception as e:  # one bad peer shouldn't kill the pack
             skipped.append({"source": "comps", "item": f"peer:{p}", "issue": "missing", "detail": str(e)})
-    pack = build_pack(ticker, hist, mkt, peers, cfg, meta_extra={"sic": sic})
-    pack["data_quality"] += skipped
-    return write_pack(pack, out_dir)
+    return {"ticker": ticker, "sic": sic, "hist": hist, "mkt": mkt, "peers": peers, "skipped": skipped}
+
+
+def assemble(inputs: dict, cfg: dict) -> dict:
+    """Pure: fetched inputs + config -> validated pitch pack dict."""
+    pack = build_pack(inputs["ticker"], inputs["hist"], inputs["mkt"], inputs["peers"], cfg,
+                      meta_extra={"sic": inputs["sic"]})
+    pack["data_quality"] += inputs["skipped"]
+    validate_pack(pack)
+    return pack
+
+
+def run(ticker: str, peer_list: list[str], out_dir: Path = OUTPUT_DIR) -> Path:
+    """I/O wrapper: fetch everything, build, validate, write."""
+    cfg = load_config(ticker)
+    return write_pack(assemble(fetch_inputs(ticker, peer_list, cfg["history_years"]), cfg), out_dir)
 
 
 def main(argv: list[str] | None = None) -> int:

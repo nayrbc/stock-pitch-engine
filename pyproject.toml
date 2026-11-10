@@ -10,10 +10,12 @@ dependencies = [
     "typer>=0.12",
     "openpyxl>=3.1",
     "pyyaml>=6.0",
+    "streamlit>=1.36",
 ]
 
 [project.scripts]
 pitch = "pitch.cli:app"
+pitch-ui = "pitch.ui:launch"
 
 [dependency-groups]
 dev = [

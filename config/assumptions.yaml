@@ -12,6 +12,7 @@ market:
   fallback_beta: 1.0             # used (and flagged) only if yfinance has no beta
   pre_tax_cost_of_debt: null     # null -> latest interest expense / total debt
   fallback_pre_tax_cost_of_debt: 0.050  # used (and flagged) if interest or debt is missing
+  wacc_override: null            # set to use this WACC instead of the calculated one
 
 dcf:
   mid_year_convention: true
@@ -19,6 +20,7 @@ dcf:
   exit_ev_ebitda: null           # null -> peer median EV/EBITDA, else fallback below
   fallback_exit_ev_ebitda: 12.0
   # Paths: a scalar (held flat), a list of `projection_years` values, or null (historical).
+  revenue_growth_start: null     # year-1 growth, fading linearly to terminal_growth (ignored if revenue_growth set)
   revenue_growth: null           # null -> start at avg(last-year growth, 5y CAGR), fading linearly to terminal_growth in final year
   ebit_margin: null              # null -> historical median (robust to one-off charges), held flat
   tax_rate: null                 # null -> historical effective rate (tax / pre-tax income)

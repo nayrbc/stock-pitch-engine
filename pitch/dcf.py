@@ -109,6 +109,11 @@ def _path(value, n: int) -> list[float]:
     raise DCFError(f"Assumption path must be a number or a list of {n} numbers, got {value!r}")
 
 
+def fade_path(g0: float, g_term: float, n: int) -> list[float]:
+    """Linear fade from g0 in year 1 to g_term in year n."""
+    return [g0 + (g_term - g0) * t / (n - 1) for t in range(n)] if n > 1 else [g0]
+
+
 def resolve_assumptions(hist: dict, cfg: dict) -> dict:
     """Projection drivers: config value if set, else clamped historical average (median for EBIT margin). Records the source of each.
 
@@ -125,6 +130,10 @@ def resolve_assumptions(hist: dict, cfg: dict) -> dict:
     if d.get("revenue_growth") is not None:
         values["revenue_growth"] = _path(d["revenue_growth"], n)
         sources["revenue_growth"] = "config"
+    elif d.get("revenue_growth_start") is not None:
+        g0 = float(d["revenue_growth_start"])
+        values["revenue_growth"] = fade_path(g0, g_term, n)
+        sources["revenue_growth"] = f"config start {g0:.2%}, linear fade to terminal growth {g_term:.2%}"
     else:
         cagr, last = h["revenue_cagr"], h["revenue_growth_yoy"][-1] if h["revenue_growth_yoy"] else None
         if cagr is None:
@@ -137,7 +146,7 @@ def resolve_assumptions(hist: dict, cfg: dict) -> dict:
             raw = (last + cagr) / 2
             desc = f"avg of last-year growth {last:.2%} and CAGR {cagr:.2%} = {raw:.2%}"
         g0 = _clamp(raw, clamps["revenue_growth"])
-        values["revenue_growth"] = [g0 + (g_term - g0) * t / (n - 1) for t in range(n)] if n > 1 else [g0]
+        values["revenue_growth"] = fade_path(g0, g_term, n)
         sources["revenue_growth"] = (
             desc + (f" (clamped to {g0:.2%})" if g0 != raw else "") + f", linear fade to terminal growth {g_term:.2%}"
         )
@@ -340,6 +349,11 @@ def run_dcf(hist: dict, market: dict, cfg: dict, exit_multiple: float | None = N
     w_kwargs, w_dq, w_src = wacc_inputs(hist, market, cfg, tax_for_wacc)
     dq += w_dq
     wacc = compute_wacc(**w_kwargs)
+    wacc["wacc_calculated"] = wacc["wacc"]
+    wacc["wacc_override"] = cfg["market"].get("wacc_override")
+    if wacc["wacc_override"] is not None:
+        wacc["wacc"] = float(wacc["wacc_override"])
+        w_src["wacc"] = "config override"
     wacc["sources"] = w_src
 
     if cfg["dcf"].get("exit_ev_ebitda") is not None:

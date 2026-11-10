@@ -146,7 +146,7 @@ def _inputs(wb, pack, R, D):
         formula=f"={R['market_cap']}/({R['market_cap']}+{R['total_debt']})")
     put("wd", "Debt weight", fmt=PCT, formula=f"={R['total_debt']}/({R['market_cap']}+{R['total_debt']})")
     put("wacc_calc", "WACC (calculated)", fmt=PCT, formula=f"={R['we']}*{R['ke']}+{R['wd']}*{R['kd_at']}")
-    put("wacc_override", "WACC override (leave blank to use calculated)", None, PCT, "optional input")
+    put("wacc_override", "WACC override (leave blank to use calculated)", w.get("wacc_override"), PCT, "optional input")
     ws[R["wacc_override"].split("!")[1].replace("$", "")].comment = None
     put("wacc", "WACC used", fmt=PCT, bold=True,
         formula=f"=IF(ISNUMBER({R['wacc_override']}),{R['wacc_override']},{R['wacc_calc']})")
