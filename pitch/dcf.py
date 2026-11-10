@@ -115,15 +115,22 @@ def resolve_assumptions(hist: dict, cfg: dict) -> dict:
         values["revenue_growth"] = _path(d["revenue_growth"], n)
         sources["revenue_growth"] = "config"
     else:
-        if h["revenue_cagr"] is None:
+        cagr, last = h["revenue_cagr"], h["revenue_growth_yoy"][-1] if h["revenue_growth_yoy"] else None
+        if cagr is None:
             raise DCFError("revenue_growth: no config value and historical CAGR unavailable")
-        g0 = _clamp(h["revenue_cagr"], clamps["revenue_growth"])
+        if last is None:
+            raw, desc = cagr, f"historical CAGR {cagr:.2%}"
+            dq.append({"item": "revenue_growth", "issue": "missing",
+                       "detail": "last-year growth unavailable; starting growth uses CAGR only"})
+        else:
+            raw = (last + cagr) / 2
+            desc = f"avg of last-year growth {last:.2%} and CAGR {cagr:.2%} = {raw:.2%}"
+        g0 = _clamp(raw, clamps["revenue_growth"])
         values["revenue_growth"] = [g0 + (g_term - g0) * t / (n - 1) for t in range(n)] if n > 1 else [g0]
         sources["revenue_growth"] = (
-            f"historical CAGR {h['revenue_cagr']:.2%}" + (f" (clamped to {g0:.2%})" if g0 != h["revenue_cagr"] else "")
-            + f", linear fade to terminal growth {g_term:.2%}"
+            desc + (f" (clamped to {g0:.2%})" if g0 != raw else "") + f", linear fade to terminal growth {g_term:.2%}"
         )
-        if g0 != h["revenue_cagr"]:
+        if g0 != raw:
             dq.append({"item": "revenue_growth", "issue": "clamped", "detail": sources["revenue_growth"]})
 
     for key in ("ebit_margin", "tax_rate", "capex_pct_revenue", "da_pct_revenue", "nwc_pct_revenue"):
@@ -180,8 +187,11 @@ def wacc_inputs(hist: dict, market: dict, cfg: dict, tax_rate: float) -> tuple[d
     if m.get("beta") is not None:
         beta, src["beta"] = m["beta"], "config"
     elif market.get("beta") is not None:
-        beta = _clamp(market["beta"], clamps["beta"])
-        src["beta"] = "yfinance" + (f" {market['beta']:.2f} clamped" if beta != market["beta"] else "")
+        raw, w = market["beta"], m.get("blume_weight", 1.0)
+        adj = w * raw + (1 - w)
+        beta = _clamp(adj, clamps["beta"])
+        src["beta"] = (f"yfinance raw {raw:.2f}" + (f", Blume-adjusted ({w:g} x raw + {1 - w:g}) = {adj:.2f}" if w != 1.0 else "")
+                       + (f", clamped to {beta:.2f}" if beta != adj else ""))
     else:
         beta, src["beta"] = m["fallback_beta"], "config fallback"
         dq.append({"item": "beta", "issue": "missing", "detail": f"no beta from yfinance; using fallback {beta}"})

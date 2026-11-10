@@ -6,8 +6,9 @@ projection_years: 5
 
 market:
   risk_free_rate: 0.043          # 10y UST
-  equity_risk_premium: 0.050
-  beta: null                     # null -> yfinance beta
+  equity_risk_premium: 0.045
+  beta: null                     # null -> yfinance raw beta, Blume-adjusted (below), then clamped
+  blume_weight: 0.67             # adjusted = w * raw + (1 - w); set 1.0 to use raw beta. Not applied to a config beta.
   fallback_beta: 1.0             # used (and flagged) only if yfinance has no beta
   pre_tax_cost_of_debt: null     # null -> latest interest expense / total debt
   fallback_pre_tax_cost_of_debt: 0.050  # used (and flagged) if interest or debt is missing
@@ -18,7 +19,7 @@ dcf:
   exit_ev_ebitda: null           # null -> peer median EV/EBITDA, else fallback below
   fallback_exit_ev_ebitda: 12.0
   # Paths: a scalar (held flat), a list of `projection_years` values, or null (historical).
-  revenue_growth: null           # null -> historical CAGR, fading linearly to terminal_growth in final year
+  revenue_growth: null           # null -> start at avg(last-year growth, 5y CAGR), fading linearly to terminal_growth in final year
   ebit_margin: null              # null -> historical average, held flat
   tax_rate: null                 # null -> historical effective rate (tax / pre-tax income)
   capex_pct_revenue: null

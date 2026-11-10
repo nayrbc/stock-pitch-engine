@@ -154,3 +154,37 @@ def test_load_config_ticker_override(tmp_path):
     cfg = load_config("xyz", tmp_path)
     assert cfg["dcf"] == {"terminal_growth": 0.03, "mid_year_convention": True}
     assert load_config("abc", tmp_path)["dcf"]["terminal_growth"] == 0.02
+
+
+def test_starting_growth_averages_last_year_and_cagr(cfg):
+    from tests.conftest import base_series, make_facts
+    s = base_series()
+    # Revenue 100 -> 200 over 4 years (CAGR 2^(1/4)-1 = 18.92%), last year 160 -> 200 = 25%.
+    s["Revenues"] = ([100, 120, 140, 160, 200], True)
+    h = normalize(make_facts(s, {"WeightedAverageNumberOfDilutedSharesOutstanding": "shares"}))
+    r = resolve_assumptions(h, cfg)
+    g0 = (0.25 + (2 ** 0.25 - 1)) / 2
+    path = r["values"]["revenue_growth"]
+    assert path[0] == pytest.approx(g0)
+    assert path[-1] == pytest.approx(cfg["dcf"]["terminal_growth"])
+    assert path[2] == pytest.approx((g0 + cfg["dcf"]["terminal_growth"]) / 2)  # linear fade
+    assert "last-year growth" in r["sources"]["revenue_growth"]
+
+
+def test_default_market_assumptions(cfg):
+    assert cfg["market"]["equity_risk_premium"] == pytest.approx(0.045)
+    assert cfg["market"]["blume_weight"] == pytest.approx(0.67)
+
+
+def test_blume_adjusted_beta(facts, cfg):
+    h = normalize(facts)
+    out = run_dcf(h, {"price": 20.0, "market_cap": 200.0, "beta": 1.6, "shares_outstanding": 10}, cfg, exit_multiple=10.0)
+    assert out["wacc"]["beta"] == pytest.approx(0.67 * 1.6 + 0.33)
+    assert "Blume" in out["wacc"]["sources"]["beta"]
+    # Clamp applies after adjustment: raw 0.1 -> 0.397 -> clamped to 0.50.
+    low = run_dcf(h, {"price": 20.0, "market_cap": 200.0, "beta": 0.1}, cfg, exit_multiple=10.0)
+    assert low["wacc"]["beta"] == pytest.approx(cfg["clamps"]["beta"][0])
+    # An explicit config beta is used as-is.
+    fixed = run_dcf(h, {"price": 20.0, "market_cap": 200.0, "beta": 1.6}, _deep_merge(cfg, {"market": {"beta": 1.2}}),
+                    exit_multiple=10.0)
+    assert fixed["wacc"]["beta"] == 1.2
